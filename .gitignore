@@ -1,0 +1,8 @@
+# Abaikan semua folder node_modules
+**/node_modules
+
+# Abaikan file environment (penting untuk keamanan)
+**/.env
+
+# Abaikan file yarn-error.log
+yarn-error.log
