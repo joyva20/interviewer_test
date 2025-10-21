@@ -22,4 +22,9 @@ export const ProductRoutes = [
         route: "/api/web/v1/product",
         controller: WebProductController.createProduct
     },
+    {
+        method: "DELETE",
+        route: "/api/web/v1/product",
+        controller: WebProductController.deleteProduct
+    },
 ]

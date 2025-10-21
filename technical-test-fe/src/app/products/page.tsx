@@ -1,13 +1,15 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import axios from 'axios';
-import { Table, Button, Space, Input, Pagination, Typography, Modal, Form, Upload, message } from 'antd';
-import { UploadOutlined } from '@ant-design/icons';
+import { Table, Button, Space, Input, Pagination, Typography, Modal, Form, Upload, message, Popconfirm } from 'antd';
+import { UploadOutlined, LogoutOutlined, UserOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type { UploadFile } from 'antd/es/upload/interface';
+import { useAuth } from '@/context/AuthContext';
 
-const { Title } = Typography;
+const { Title, Text } = Typography;
 const { TextArea } = Input;
 
 // Interface Product sesuai spesifikasi
@@ -38,6 +40,10 @@ function useDebounce<T>(value: T, delay: number): T {
 }
 
 export default function ProductsPage() {
+  // Auth & Router
+  const { user, loading: authLoading, logout, getToken } = useAuth();
+  const router = useRouter();
+  
   // Setup State
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -46,6 +52,11 @@ export default function ProductsPage() {
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [totalItems, setTotalItems] = useState(0);
   
   // Debounced search term
   const debouncedSearchTerm = useDebounce(searchTerm, 300);
@@ -57,25 +68,104 @@ export default function ProductsPage() {
   const fetchProducts = async () => {
     try {
       setLoading(true);
+      
+      // Get Firebase token
+      const token = await getToken();
+      console.log('Firebase Token:', token ? 'Token berhasil didapat' : 'Tidak ada token');
+      
       const response = await axios.get('/api/products', {
-        params: { search: debouncedSearchTerm }
+        params: { 
+          search: debouncedSearchTerm,
+          page: currentPage,
+          limit: pageSize
+        },
+        headers: {
+          ...(token && { Authorization: `Bearer ${token}` })
+        }
       });
-      // API mengembalikan { data: [...] }, jadi kita ambil response.data.data
-      const productsData = response.data.data || [];
+      
+      // Debug: Log response structure
+      console.log('API Response:', response.data);
+      
+      // API mengembalikan { data: [...], pagination: { total, ... } }
+      // Pastikan data adalah array
+      let productsData = [];
+      
+      if (response.data && Array.isArray(response.data.data)) {
+        productsData = response.data.data;
+      } else if (Array.isArray(response.data)) {
+        // Jika response langsung array (format lama)
+        productsData = response.data;
+      }
+      
+      console.log('Products Data (array):', productsData);
       setProducts(productsData);
+      
+      // Update total items dari pagination response
+      if (response.data.pagination) {
+        setTotalItems(response.data.pagination.total);
+      } else {
+        setTotalItems(productsData.length);
+      }
     } catch (error) {
       console.error('Error fetching products:', error);
       setProducts([]); // Set empty array jika error
+      setTotalItems(0);
     } finally {
       setLoading(false);
     }
   };
 
-  // useEffect untuk memanggil fetchProducts saat debouncedSearchTerm berubah
+  // Protected Route - Redirect jika belum login
   useEffect(() => {
-    fetchProducts();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!authLoading && !user) {
+      message.warning('Please login to access this page');
+      router.push('/login');
+    }
+  }, [authLoading, user, router]);
+
+  // useEffect untuk reset page ke 1 saat search berubah
+  useEffect(() => {
+    setCurrentPage(1);
   }, [debouncedSearchTerm]);
+
+  // useEffect untuk memanggil fetchProducts saat dependencies berubah
+  useEffect(() => {
+    if (user) {
+      fetchProducts();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearchTerm, currentPage, pageSize, user]);
+
+  // Handle Logout
+  const handleLogout = async () => {
+    try {
+      await logout();
+      message.success('Logged out successfully');
+      router.push('/login');
+    } catch (error) {
+      message.error('Failed to logout');
+    }
+  };
+
+  // Show loading saat check authentication
+  if (authLoading) {
+    return (
+      <div style={{ 
+        minHeight: '100vh', 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center' 
+      }}>
+        <Title level={4}>Loading...</Title>
+      </div>
+    );
+  }
+
+  // Jika belum login, return null (akan redirect)
+  if (!user) {
+    return null;
+  }
 
   // Setup Kolom Tabel
   const columns: ColumnsType<Product> = [
@@ -109,19 +199,47 @@ export default function ProductsPage() {
           <Button type="primary" onClick={() => handleShowEditModal(record)}>
             Edit
           </Button>
-          <Button danger onClick={() => handleDelete(record.product_id)}>
-            Delete
-          </Button>
+          <Popconfirm
+            title="Delete the product"
+            description="Are you sure you want to delete this product?"
+            onConfirm={() => handleDelete(record.product_id)}
+            okText="Yes"
+            cancelText="No"
+          >
+            <Button danger>Delete</Button>
+          </Popconfirm>
         </Space>
       ),
     },
   ];
 
-  // Placeholder functions untuk Edit dan Delete
-  // Placeholder functions untuk Delete
-  const handleDelete = (productId: string) => {
-    console.log('Delete product:', productId);
-    // TODO: Implement delete functionality
+  // Fungsi Delete Product
+  const handleDelete = async (productId: string) => {
+    try {
+      console.log('Deleting product with ID:', productId);
+      
+      // Get Firebase token
+      const token = await getToken();
+      console.log('Firebase Token for Delete:', token ? 'Token berhasil didapat' : 'Tidak ada token');
+      
+      const response = await axios.delete(`/api/product?product_id=${productId}`, {
+        headers: {
+          ...(token && { Authorization: `Bearer ${token}` })
+        }
+      });
+      console.log('Delete response:', response.data);
+      message.success('Product deleted successfully!');
+      
+      // Reset ke page 1 jika produk di page terakhir habis
+      if (products.length === 1 && currentPage > 1) {
+        setCurrentPage(currentPage - 1);
+      } else {
+        fetchProducts(); // Refresh tabel setelah delete
+      }
+    } catch (error) {
+      console.error('Failed to delete product', error);
+      message.error('Failed to delete product');
+    }
   };
 
   // Fungsi Buka Modal Create
@@ -152,6 +270,10 @@ export default function ProductsPage() {
     try {
       setFormLoading(true);
       
+      // Get Firebase token
+      const token = await getToken();
+      console.log('Firebase Token for Submit:', token ? 'Token berhasil didapat' : 'Tidak ada token');
+      
       // Jika ada file yang diupload, tambahkan ke values
       if (fileList.length > 0 && fileList[0].originFileObj) {
         // Untuk saat ini, kita simpan nama file saja
@@ -159,18 +281,24 @@ export default function ProductsPage() {
         values.product_image = fileList[0].name;
       }
       
+      const config = {
+        headers: {
+          ...(token && { Authorization: `Bearer ${token}` })
+        }
+      };
+      
       if (editingProduct) {
         // Update existing product
         await axios.put('/api/product', {
           ...values,
           product_id: editingProduct.product_id
-        });
+        }, config);
         
         // Tampilkan notifikasi success
         message.success('Product updated successfully!');
       } else {
         // Create new product
-        await axios.post('/api/product', values);
+        await axios.post('/api/product', values, config);
         
         // Tampilkan notifikasi success
         message.success('Product created successfully!');
@@ -219,7 +347,30 @@ export default function ProductsPage() {
         borderRadius: '8px',
         boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
       }}>
-        <Title level={2} style={{ marginBottom: '24px' }}>Product List</Title>
+        {/* Header dengan User Info dan Logout */}
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          marginBottom: '24px',
+          paddingBottom: '16px',
+          borderBottom: '1px solid #f0f0f0'
+        }}>
+          <Title level={2} style={{ margin: 0 }}>Product List</Title>
+          <Space>
+            <Space>
+              <UserOutlined style={{ fontSize: '16px' }} />
+              <Text strong>{user?.email}</Text>
+            </Space>
+            <Button 
+              danger 
+              icon={<LogoutOutlined />}
+              onClick={handleLogout}
+            >
+              Logout
+            </Button>
+          </Space>
+        </div>
         
         <Space direction="vertical" size="large" style={{ width: '100%' }}>
           {/* Search dan Create Button */}
@@ -255,11 +406,19 @@ export default function ProductsPage() {
 
           {/* Pagination */}
           <Pagination
-            total={products.length}
+            current={currentPage}
+            pageSize={pageSize}
+            total={totalItems}
+            onChange={(page, size) => {
+              setCurrentPage(page);
+              if (size !== pageSize) {
+                setPageSize(size);
+                setCurrentPage(1); // Reset ke page 1 jika page size berubah
+              }
+            }}
             showSizeChanger
             showQuickJumper
-            showTotal={(total) => `Total ${total} products`}
-            defaultPageSize={10}
+            showTotal={(total) => `Total ${total} items`}
             style={{ textAlign: 'right', marginTop: '16px' }}
           />
         </Space>
