@@ -1,10 +1,22 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, NextRequest } from 'next/server';
 import axios from 'axios';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    // Memanggil backend API eksternal
-    const response = await axios.get('http://localhost:8001/api/web/v1/products');
+    // Ambil search param dari URL
+    const { searchParams } = new URL(request.url);
+    const search = searchParams.get('search');
+    
+    // Siapkan params untuk axios
+    const axiosParams: { search?: string } = {};
+    if (search) {
+      axiosParams.search = search;
+    }
+    
+    // Memanggil backend API eksternal dengan params
+    const response = await axios.get('http://localhost:8001/api/web/v1/products', {
+      params: axiosParams
+    });
     
     // Mengembalikan data dari backend
     return NextResponse.json(response.data);
