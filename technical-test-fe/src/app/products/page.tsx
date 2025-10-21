@@ -87,6 +87,24 @@ export default function ProductsPage() {
       // Debug: Log response structure
       console.log('API Response:', response.data);
       
+      // Check jika response mengandung error (status_code: "200" tapi ada error)
+      if (response.data.status_code === "200" && response.data.is_success === false) {
+        console.error('API Error:', response.data.data);
+        
+        // Jika token expired, logout user
+        if (response.data.data && response.data.data.includes('expired')) {
+          message.error('Session expired. Please login again.');
+          await logout();
+          router.push('/login');
+          return;
+        }
+        
+        message.error('Failed to load products');
+        setProducts([]);
+        setTotalItems(0);
+        return;
+      }
+      
       // API mengembalikan { data: [...], pagination: { total, ... } }
       // Pastikan data adalah array
       let productsData = [];
@@ -111,6 +129,7 @@ export default function ProductsPage() {
       console.error('Error fetching products:', error);
       setProducts([]); // Set empty array jika error
       setTotalItems(0);
+      message.error('Failed to load products');
     } finally {
       setLoading(false);
     }
@@ -227,7 +246,25 @@ export default function ProductsPage() {
           ...(token && { Authorization: `Bearer ${token}` })
         }
       });
+      
       console.log('Delete response:', response.data);
+      
+      // Check jika response mengandung error
+      if (response.data.status_code === "200" && response.data.is_success === false) {
+        console.error('API Error:', response.data.data);
+        
+        // Jika token expired, logout user
+        if (response.data.data && response.data.data.includes('expired')) {
+          message.error('Session expired. Please login again.');
+          await logout();
+          router.push('/login');
+          return;
+        }
+        
+        message.error('Failed to delete product');
+        return;
+      }
+      
       message.success('Product deleted successfully!');
       
       // Reset ke page 1 jika produk di page terakhir habis
@@ -236,8 +273,17 @@ export default function ProductsPage() {
       } else {
         fetchProducts(); // Refresh tabel setelah delete
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to delete product', error);
+      
+      // Check if error response has token expired message
+      if (error.response?.data?.data?.includes('expired')) {
+        message.error('Session expired. Please login again.');
+        await logout();
+        router.push('/login');
+        return;
+      }
+      
       message.error('Failed to delete product');
     }
   };
@@ -287,29 +333,53 @@ export default function ProductsPage() {
         }
       };
       
+      let response;
+      
       if (editingProduct) {
         // Update existing product
-        await axios.put('/api/product', {
+        response = await axios.put('/api/product', {
           ...values,
           product_id: editingProduct.product_id
         }, config);
-        
-        // Tampilkan notifikasi success
-        message.success('Product updated successfully!');
       } else {
         // Create new product
-        await axios.post('/api/product', values, config);
-        
-        // Tampilkan notifikasi success
-        message.success('Product created successfully!');
+        response = await axios.post('/api/product', values, config);
       }
+      
+      // Check jika response mengandung error
+      if (response.data.status_code === "200" && response.data.is_success === false) {
+        console.error('API Error:', response.data.data);
+        
+        // Jika token expired, logout user
+        if (response.data.data && response.data.data.includes('expired')) {
+          message.error('Session expired. Please login again.');
+          await logout();
+          router.push('/login');
+          return;
+        }
+        
+        message.error(editingProduct ? 'Failed to update product' : 'Failed to create product');
+        return;
+      }
+      
+      // Tampilkan notifikasi success
+      message.success(editingProduct ? 'Product updated successfully!' : 'Product created successfully!');
       
       setIsModalOpen(false);
       setFileList([]);
       setEditingProduct(null);
       fetchProducts(); // Refresh tabel
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error submitting product:', error);
+      
+      // Check if error response has token expired message
+      if (error.response?.data?.data?.includes('expired')) {
+        message.error('Session expired. Please login again.');
+        await logout();
+        router.push('/login');
+        return;
+      }
+      
       // Tampilkan notifikasi error
       message.error(editingProduct ? 'Failed to update product. Please try again.' : 'Failed to create product. Please try again.');
     } finally {
